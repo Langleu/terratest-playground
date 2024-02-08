@@ -3,6 +3,9 @@ package helpers
 import (
 	"context"
 	"fmt"
+	"os"
+	"strings"
+	"testing"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -11,7 +14,10 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/eks"
 	eks_types "github.com/aws/aws-sdk-go-v2/service/eks/types"
 	"github.com/aws/aws-sdk-go/aws"
+	"github.com/gruntwork-io/terratest/modules/helm"
 	"github.com/gruntwork-io/terratest/modules/k8s"
+	"github.com/stretchr/testify/require"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // AWS Helpers
@@ -134,4 +140,169 @@ type Cluster struct {
 	ClusterName      string
 	KubectlNamespace k8s.KubectlOptions
 	KubectlSystem    k8s.KubectlOptions
+}
+
+// Kubernetes Helpers
+
+func CrossClusterCommunication(t *testing.T, withDNS bool, k8sManifests string, primary, secondary Cluster) {
+	kubeResourcePath := fmt.Sprintf("%s/%s", k8sManifests, "nginx.yml")
+
+	defer k8s.KubectlDelete(t, &primary.KubectlNamespace, kubeResourcePath)
+	defer k8s.KubectlDelete(t, &secondary.KubectlNamespace, kubeResourcePath)
+
+	k8s.KubectlApply(t, &primary.KubectlNamespace, kubeResourcePath)
+	k8s.KubectlApply(t, &secondary.KubectlNamespace, kubeResourcePath)
+
+	k8s.WaitUntilServiceAvailable(t, &primary.KubectlNamespace, "sample-nginx-peer", 10, 5*time.Second)
+	k8s.WaitUntilServiceAvailable(t, &secondary.KubectlNamespace, "sample-nginx-peer", 10, 5*time.Second)
+
+	k8s.WaitUntilPodAvailable(t, &primary.KubectlNamespace, "sample-nginx", 10, 5*time.Second)
+	k8s.WaitUntilPodAvailable(t, &secondary.KubectlNamespace, "sample-nginx", 10, 5*time.Second)
+
+	podPrimary := k8s.GetPod(t, &primary.KubectlNamespace, "sample-nginx")
+	podPrimaryIP := podPrimary.Status.PodIP
+	require.NotEmpty(t, podPrimaryIP)
+
+	podSecondary := k8s.GetPod(t, &secondary.KubectlNamespace, "sample-nginx")
+	podSecondaryIP := podSecondary.Status.PodIP
+	require.NotEmpty(t, podSecondaryIP)
+
+	if withDNS {
+		for i := 0; i < 6; i++ {
+			outputPrimary, errPrimary := k8s.RunKubectlAndGetOutputE(t, &primary.KubectlNamespace, "exec", podPrimary.Name, "--", "curl", "--max-time", "15", "sample-nginx.sample-nginx-peer.camunda-secondary.svc.cluster.local")
+			outputSecondary, errSecondary := k8s.RunKubectlAndGetOutputE(t, &secondary.KubectlNamespace, "exec", podSecondary.Name, "--", "curl", "--max-time", "15", "sample-nginx.sample-nginx-peer.camunda-primary.svc.cluster.local")
+			if errPrimary != nil || errSecondary != nil {
+				fmt.Println("Error: ", errPrimary)
+				fmt.Println("Error: ", errSecondary)
+				time.Sleep(15 * time.Second)
+			}
+
+			if outputPrimary != "" && outputSecondary != "" {
+				fmt.Println(outputPrimary)
+				fmt.Println(outputSecondary)
+				break
+			}
+		}
+	} else {
+		k8s.RunKubectl(t, &primary.KubectlNamespace, "exec", podPrimary.Name, "--", "curl", "--max-time", "15", podSecondaryIP)
+		k8s.RunKubectl(t, &secondary.KubectlNamespace, "exec", podSecondary.Name, "--", "curl", "--max-time", "15", podPrimaryIP)
+	}
+}
+
+func DNSChaining(t *testing.T, source, target Cluster, k8sManifests string) {
+
+	t.Logf(fmt.Sprintf("[DNS CHAINING] applying from source %s to configure target %s", source.ClusterName, target.ClusterName))
+
+	kubeResourcePath := fmt.Sprintf("%s/%s", k8sManifests, "internal-dns-lb.yml")
+
+	k8s.KubectlApply(t, &source.KubectlNamespace, kubeResourcePath)
+
+	k8s.WaitUntilServiceAvailable(t, &source.KubectlNamespace, "internal-dns-lb", 15, 6*time.Second)
+
+	host := k8s.GetService(t, &source.KubectlNamespace, "internal-dns-lb")
+
+	hostName := strings.Split(host.Status.LoadBalancer.Ingress[0].Hostname, ".")
+
+	hostName = strings.Split(hostName[0], "-")
+
+	awsDescriptor := fmt.Sprintf("ELB net/%s/%s", hostName[0], hostName[1])
+
+	require.NotEmpty(t, awsDescriptor)
+
+	privateIPs := GetPrivateIPsForInternalLB(source.Region, awsDescriptor)
+
+	require.NotEmpty(t, privateIPs)
+	require.Greater(t, len(privateIPs), 1)
+
+	// Just a check that the ConfigMap exists
+	k8s.GetConfigMap(t, &target.KubectlNamespace, "coredns")
+
+	// Replace template placeholder for IPs
+	filePath := fmt.Sprintf("%s/%s", k8sManifests, "coredns.yml")
+	content, err := os.ReadFile(filePath)
+	if err != nil {
+		fmt.Printf("Error reading file: %v\n", err)
+		return
+	}
+
+	// Convert byte slice to string
+	fileContent := string(content)
+
+	// Define the template and replacement string
+	template := "PLACEHOLDER"
+	replacement := fmt.Sprintf(`
+    %s.svc.cluster.local:53 {
+        errors
+        cache 30
+        forward . %s {
+            force_tcp
+        }
+    }`, source.KubectlNamespace.Namespace, strings.Join(privateIPs, " "))
+
+	// Replace the template with the replacement string
+	modifiedContent := strings.Replace(fileContent, template, replacement, -1)
+
+	// Write the modified content back to the file
+	err = os.WriteFile(filePath, []byte(modifiedContent), 0644)
+	if err != nil {
+		fmt.Printf("Error writing file: %v\n", err)
+		return
+	}
+
+	// Apply the CoreDNS change to the target cluster to let it know how to reach the source cluster
+	k8s.KubectlApply(t, &target.KubectlNamespace, filePath)
+
+	// Write the old file back to the file - required for bidirectional communication
+	err = os.WriteFile(filePath, []byte(fileContent), 0644)
+	if err != nil {
+		fmt.Printf("Error writing file: %v\n", err)
+		return
+	}
+
+}
+
+func CheckCoreDNSReload(t *testing.T, kubectlOptions *k8s.KubectlOptions) {
+	pods := k8s.ListPods(t, kubectlOptions, metav1.ListOptions{LabelSelector: "k8s-app=kube-dns"})
+
+	for _, pod := range pods {
+		for i := 0; i < 8; i++ {
+			logs := k8s.GetPodLogs(t, kubectlOptions, &pod, "coredns")
+
+			if !strings.Contains(logs, "Reloading complete") {
+				time.Sleep(15 * time.Second)
+			} else {
+				break
+			}
+		}
+	}
+}
+
+func TeardownC8Helm(t *testing.T, kubectlOptions *k8s.KubectlOptions) {
+	helmOptions := &helm.Options{
+		KubectlOptions: kubectlOptions,
+	}
+
+	helm.Delete(t, helmOptions, "camunda", true)
+
+	pvcs := k8s.ListPersistentVolumeClaims(t, kubectlOptions, metav1.ListOptions{})
+
+	for _, pvc := range pvcs {
+		k8s.RunKubectl(t, kubectlOptions, "delete", "pvc", pvc.Name)
+	}
+
+	pvs := k8s.ListPersistentVolumes(t, kubectlOptions, metav1.ListOptions{})
+
+	for _, pv := range pvs {
+		k8s.RunKubectl(t, kubectlOptions, "delete", "pv", pv.Name)
+	}
+
+}
+
+// Go Helpers
+func GetEnv(key, fallback string) string {
+	value, exists := os.LookupEnv(key)
+	if !exists {
+		value = fallback
+	}
+	return value
 }

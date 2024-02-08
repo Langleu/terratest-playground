@@ -14,19 +14,16 @@ import (
 	"multiregiontests/internal/helpers"
 
 	"github.com/camunda/zeebe/clients/go/v8/pkg/zbc"
-	"github.com/gruntwork-io/go-commons/files"
 	"github.com/gruntwork-io/terratest/modules/helm"
 	"github.com/gruntwork-io/terratest/modules/k8s"
 	"github.com/gruntwork-io/terratest/modules/random"
 	"github.com/gruntwork-io/terratest/modules/terraform"
 	"github.com/stretchr/testify/require"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 const (
-	remoteChartSource  = "https://helm.camunda.io"
-	remoteChartName    = "camunda/camunda-platform"
-	remoteChartVersion = "8.3.5"
+	remoteChartSource = "https://helm.camunda.io"
+	remoteChartName   = "camunda/camunda-platform"
 
 	terraformDir        = "./resources/aws/2-region/terraform"
 	kubeConfigPrimary   = "./kubeconfig-london"
@@ -34,11 +31,16 @@ const (
 	k8sManifests        = "./resources/aws/2-region/kubernetes"
 )
 
+var remoteChartVersion = helpers.GetEnv("HELM_CHART_VERSION", "8.3.5")
+
 var primary helpers.Cluster
 var secondary helpers.Cluster
 
+// Terraform Cluster Setup and TearDown
+
 func TestSetupTerraform(t *testing.T) {
 	t.Logf("[SETUP] Hello 👋!")
+
 	terraformOptions := terraform.WithDefaultRetryableErrors(t, &terraform.Options{
 		TerraformDir: terraformDir,
 		NoColor:      true,
@@ -53,7 +55,7 @@ func TestSetupTerraform(t *testing.T) {
 		fmt.Println("could not run command: ", err)
 	}
 
-	files.FileExists("kubeconfig-paris")
+	require.FileExists(t, "kubeconfig-paris", "kubeconfig-paris file does not exist")
 
 	cmd2 := exec.Command("aws", "eks", "--region", "eu-west-2", "update-kubeconfig", "--name", "lars-london", "--profile", "infex", "--kubeconfig", "kubeconfig-london")
 
@@ -62,7 +64,7 @@ func TestSetupTerraform(t *testing.T) {
 		fmt.Println("could not run command: ", err2)
 	}
 
-	files.FileExists("kubeconfig-london")
+	require.FileExists(t, "kubeconfig-london", "kubeconfig-london file does not exist")
 }
 
 func TestTeardownTerraform(t *testing.T) {
@@ -74,10 +76,14 @@ func TestTeardownTerraform(t *testing.T) {
 	})
 	terraform.Destroy(t, terraformOptions)
 
-	defer os.Remove("kubeconfig-paris")
-	defer os.Remove("kubeconfig-london")
+	os.Remove("kubeconfig-paris")
+	os.Remove("kubeconfig-london")
 
+	require.NoFileExists(t, "kubeconfig-paris", "kubeconfig-paris file still exists")
+	require.NoFileExists(t, "kubeconfig-london", "kubeconfig-london file still exists")
 }
+
+// AWS EKS Multi-Region Tests
 
 func Test2RegionAWSEKS(t *testing.T) {
 	t.Parallel()
@@ -85,27 +91,50 @@ func Test2RegionAWSEKS(t *testing.T) {
 	// For CI run it separately
 	// go test --count=1 -v -timeout 120m ../test -run TestSetupTerraform
 	// go test --count=1 -v -timeout 120m ../test -run Test2RegionAWSEKS
-	// go test --count=1 -v -timeout 120m ../test -run TestTearDownTerraform
+	// go test --count=1 -v -timeout 120m ../test -run TestTeardownTerraform
+
+	// Pre and Post steps - deactivated for CI
 	// setupTerraform(t)
 	// defer teardownTerraform(t)
 
+	// Runs the tests sequentially
 	for _, testFuncs := range []struct {
 		name  string
 		tfunc func(*testing.T)
 	}{
 		{"TestInitKubernetesHelpers", initKubernetesHelpers},
-		// {"TestClusterReadyCheck", clusterReadyCheck},
-		// {"TestCrossClusterCommunication", testCrossClusterCommunication},
+		{"TestClusterReadyCheck", clusterReadyCheck},
+		{"TestCrossClusterCommunication", testCrossClusterCommunication},
 		{"TestApplyDnsChaining", applyDnsChaining},
 		{"TestCoreDNSReload", testCoreDNSReload},
 		{"TestCrossClusterCommunicationWithDNS", testCrossClusterCommunicationWithDNS},
-		// {"TestDeployC8Helm", deployC8Helm},
-		// {"TestCheckC8RunningProperly", checkC8RunningProperly},
-		// {"TestTeardownAllC8Helm", teardownAllC8Helm},
+		{"TestDeployC8Helm", deployC8Helm},
+		{"TestCheckC8RunningProperly", checkC8RunningProperly},
+		{"TestTeardownAllC8Helm", teardownAllC8Helm},
 		{"TestCleanupKubernetes", cleanupKubernetes},
 	} {
 		t.Run(testFuncs.name, testFuncs.tfunc)
 	}
+}
+
+// Single Test functions
+
+func initKubernetesHelpers(t *testing.T) {
+	primary = helpers.Cluster{
+		Region:           "eu-west-2",
+		ClusterName:      "lars-london",
+		KubectlNamespace: *k8s.NewKubectlOptions("", kubeConfigPrimary, "camunda-primary"),
+		KubectlSystem:    *k8s.NewKubectlOptions("", kubeConfigPrimary, "kube-system"),
+	}
+	secondary = helpers.Cluster{
+		Region:           "eu-west-3",
+		ClusterName:      "lars-paris",
+		KubectlNamespace: *k8s.NewKubectlOptions("", kubeConfigSecondary, "camunda-secondary"),
+		KubectlSystem:    *k8s.NewKubectlOptions("", kubeConfigSecondary, "kube-system"),
+	}
+
+	k8s.CreateNamespace(t, &primary.KubectlNamespace, "camunda-primary")
+	k8s.CreateNamespace(t, &secondary.KubectlNamespace, "camunda-secondary")
 }
 
 func clusterReadyCheck(t *testing.T) {
@@ -119,163 +148,22 @@ func clusterReadyCheck(t *testing.T) {
 	helpers.WaitForNodeGroup(secondary.Region, secondary.ClusterName, "services")
 }
 
-// TODO: clean up resources after entire testing is done
-func dnsChaining(t *testing.T, source, target k8s.KubectlOptions, namespaceSuffix string) {
-
-	t.Logf(fmt.Sprintf("[DNS CHAINING] applying from source %s to configure target %s", source.ContextName, target.ContextName))
-
-	kubeResourcePath := fmt.Sprintf("%s/%s", k8sManifests, "internal-dns-lb.yml")
-
-	k8s.KubectlApply(t, &source, kubeResourcePath)
-
-	k8s.WaitUntilServiceAvailable(t, &source, "internal-dns-lb", 15, 6*time.Second)
-
-	host := k8s.GetService(t, &source, "internal-dns-lb")
-
-	hostName := strings.Split(host.Status.LoadBalancer.Ingress[0].Hostname, ".")
-
-	hostName = strings.Split(hostName[0], "-")
-
-	description := fmt.Sprintf("ELB net/%s/%s", hostName[0], hostName[1])
-
-	require.NotEmpty(t, description)
-
-	region := primary.Region
-
-	if namespaceSuffix == "secondary" {
-		region = secondary.Region
-	}
-
-	privateIPs := helpers.GetPrivateIPsForInternalLB(region, description)
-
-	require.NotEmpty(t, privateIPs)
-	require.Greater(t, len(privateIPs), 1)
-
-	configMap := k8s.GetConfigMap(t, &target, "coredns")
-
-	require.Equal(t, configMap.Name, "coredns")
-
-	filePath := "./resources/aws/2-region/kubernetes/coredns.yml"
-	content, err := os.ReadFile(filePath)
-	if err != nil {
-		fmt.Printf("Error reading file: %v\n", err)
-		return
-	}
-
-	// Convert byte slice to string
-	fileContent := string(content)
-
-	// Define the template and replacement string
-	template := "PLACEHOLDER"
-	replacement := fmt.Sprintf(`
-    camunda-%s.svc.cluster.local:53 {
-        errors
-        cache 30
-        forward . %s {
-            force_tcp
-        }
-    }`, namespaceSuffix, strings.Join(privateIPs, " "))
-
-	// Replace the template with the replacement string
-	modifiedContent := strings.Replace(fileContent, template, replacement, -1)
-
-	// Write the modified content back to the file
-	err = os.WriteFile(filePath, []byte(modifiedContent), 0644)
-	if err != nil {
-		fmt.Printf("Error writing file: %v\n", err)
-		return
-	}
-
-	k8s.KubectlApply(t, &target, filePath)
-
-	err = os.WriteFile(filePath, []byte(fileContent), 0644)
-	if err != nil {
-		fmt.Printf("Error writing file: %v\n", err)
-		return
-	}
-
+func testCrossClusterCommunication(t *testing.T) {
+	helpers.CrossClusterCommunication(t, false, k8sManifests, primary, secondary)
 }
 
 func applyDnsChaining(t *testing.T) {
-	dnsChaining(t, primary.KubectlSystem, secondary.KubectlSystem, "primary")
-	dnsChaining(t, secondary.KubectlSystem, primary.KubectlSystem, "secondary")
-}
-
-func crossClusterCommunication(t *testing.T, namespace string) {
-	kubeResourcePath := fmt.Sprintf("%s/%s", k8sManifests, "nginx.yml")
-
-	optionsPrimary := primary.KubectlNamespace
-	optionsSecondary := secondary.KubectlNamespace
-
-	defer k8s.KubectlDelete(t, &optionsPrimary, kubeResourcePath)
-	defer k8s.KubectlDelete(t, &optionsSecondary, kubeResourcePath)
-
-	k8s.KubectlApply(t, &optionsPrimary, kubeResourcePath)
-	k8s.KubectlApply(t, &optionsSecondary, kubeResourcePath)
-
-	k8s.WaitUntilServiceAvailable(t, &optionsPrimary, "sample-nginx-peer", 10, 5*time.Second)
-	k8s.WaitUntilServiceAvailable(t, &optionsSecondary, "sample-nginx-peer", 10, 5*time.Second)
-
-	k8s.WaitUntilPodAvailable(t, &optionsPrimary, "sample-nginx", 10, 5*time.Second)
-	k8s.WaitUntilPodAvailable(t, &optionsSecondary, "sample-nginx", 10, 5*time.Second)
-
-	podPrimary := k8s.GetPod(t, &optionsPrimary, "sample-nginx")
-	podPrimaryIP := podPrimary.Status.PodIP
-	require.NotEmpty(t, podPrimaryIP)
-
-	podSecondary := k8s.GetPod(t, &optionsSecondary, "sample-nginx")
-	podSecondaryIP := podSecondary.Status.PodIP
-	require.NotEmpty(t, podSecondaryIP)
-
-	if namespace == "DNS" {
-		for i := 0; i < 6; i++ {
-			outputPrimary, errPrimary := k8s.RunKubectlAndGetOutputE(t, &optionsPrimary, "exec", podPrimary.Name, "--", "curl", "--max-time", "15", "sample-nginx.sample-nginx-peer.camunda-secondary.svc.cluster.local")
-			outputSecondary, errSecondary := k8s.RunKubectlAndGetOutputE(t, &optionsSecondary, "exec", podSecondary.Name, "--", "curl", "--max-time", "15", "sample-nginx.sample-nginx-peer.camunda-primary.svc.cluster.local")
-			if errPrimary != nil || errSecondary != nil {
-				fmt.Println("Error: ", errPrimary)
-				fmt.Println("Error: ", errSecondary)
-				time.Sleep(15 * time.Second)
-			}
-
-			if outputPrimary != "" && outputSecondary != "" {
-				fmt.Println(outputPrimary)
-				fmt.Println(outputSecondary)
-				break
-			}
-		}
-	} else {
-		k8s.RunKubectl(t, &optionsPrimary, "exec", podPrimary.Name, "--", "curl", "--max-time", "15", podSecondaryIP)
-		k8s.RunKubectl(t, &optionsSecondary, "exec", podSecondary.Name, "--", "curl", "--max-time", "15", podPrimaryIP)
-	}
-}
-
-func testCrossClusterCommunication(t *testing.T) {
-	crossClusterCommunication(t, "withoutDNS")
-}
-
-func testCrossClusterCommunicationWithDNS(t *testing.T) {
-	crossClusterCommunication(t, "DNS")
+	helpers.DNSChaining(t, primary, secondary, k8sManifests)
+	helpers.DNSChaining(t, secondary, primary, k8sManifests)
 }
 
 func testCoreDNSReload(t *testing.T) {
-	checkCoreDNSReload(t, &primary.KubectlSystem)
-	checkCoreDNSReload(t, &secondary.KubectlSystem)
+	helpers.CheckCoreDNSReload(t, &primary.KubectlSystem)
+	helpers.CheckCoreDNSReload(t, &secondary.KubectlSystem)
 }
 
-func checkCoreDNSReload(t *testing.T, kubectlOptions *k8s.KubectlOptions) {
-	pods := k8s.ListPods(t, kubectlOptions, metav1.ListOptions{LabelSelector: "k8s-app=kube-dns"})
-
-	for _, pod := range pods {
-		for i := 0; i < 8; i++ {
-			logs := k8s.GetPodLogs(t, kubectlOptions, &pod, "coredns")
-
-			if !strings.Contains(logs, "Reloading complete") {
-				time.Sleep(15 * time.Second)
-			} else {
-				break
-			}
-		}
-	}
+func testCrossClusterCommunicationWithDNS(t *testing.T) {
+	helpers.CrossClusterCommunication(t, true, k8sManifests, primary, secondary)
 }
 
 func deployC8Helm(t *testing.T) {
@@ -287,6 +175,7 @@ func deployC8Helm(t *testing.T) {
 		zeebeContactPoints += fmt.Sprintf("camunda-zeebe-%s.camunda-zeebe.camunda-secondary.svc.cluster.local:26502,", strconv.Itoa((i)))
 	}
 
+	// Cut the last character "," from the string
 	zeebeContactPoints = zeebeContactPoints[:len(zeebeContactPoints)-1]
 
 	filePath := "./resources/aws/2-region/kubernetes/camunda-values.yml"
@@ -324,14 +213,8 @@ func deployC8Helm(t *testing.T) {
 		ValuesFiles:    []string{"./resources/aws/2-region/kubernetes/camunda-values.yml", "./resources/aws/2-region/kubernetes/region1/camunda-values.yml"},
 	}
 
-	// TODO: move to separate teardown function
-	// defer k8s.DeleteNamespace(t, kubectlOptions, namespaceName)
-	// k8s.CreateNamespace(t, optionsPrimary, "camunda-primary")
-
 	uniqueName := strings.ToLower(fmt.Sprintf("terratest-%s", random.UniqueId()))
 
-	// TODO: move to separate teardown function
-	// defer helm.RemoveRepo(t, options, uniqueName)
 	helm.AddRepo(t, helmOptionsPrimary, uniqueName, remoteChartSource)
 	helm.AddRepo(t, helmOptionsSecondary, uniqueName, remoteChartSource)
 
@@ -339,11 +222,11 @@ func deployC8Helm(t *testing.T) {
 
 	releaseName := "camunda"
 
-	// TODO: move to separate teardown function
-	// defer helm.Delete(t, options, releaseName, true)
-
 	helm.Install(t, helmOptionsPrimary, helmChart, releaseName)
 	helm.Install(t, helmOptionsSecondary, helmChart, releaseName)
+
+	// Check that all deployments and Statefulsets are available
+	// Terratest has no direct function for Statefulsets, therefore defaulting to pods directly
 
 	// 20 times with 15 seconds sleep = 5 minutes
 	k8s.WaitUntilDeploymentAvailable(t, &primary.KubectlNamespace, "camunda-connectors", 20, 15*time.Second)
@@ -373,12 +256,12 @@ func deployC8Helm(t *testing.T) {
 	k8s.WaitUntilPodAvailable(t, &secondary.KubectlNamespace, "camunda-zeebe-2", 20, 15*time.Second)
 	k8s.WaitUntilPodAvailable(t, &secondary.KubectlNamespace, "camunda-zeebe-3", 20, 15*time.Second)
 
+	// Write the old file back to the file - mostly for local development
 	err = os.WriteFile(filePath, []byte(fileContent), 0644)
 	if err != nil {
 		fmt.Printf("Error writing file: %v\n", err)
 		return
 	}
-
 }
 
 func checkC8RunningProperly(t *testing.T) {
@@ -426,48 +309,8 @@ func checkC8RunningProperly(t *testing.T) {
 }
 
 func teardownAllC8Helm(t *testing.T) {
-	teardownC8Helm(t, &primary.KubectlNamespace)
-	teardownC8Helm(t, &secondary.KubectlNamespace)
-
-}
-
-func teardownC8Helm(t *testing.T, kubectlOptions *k8s.KubectlOptions) {
-	helmOptions := &helm.Options{
-		KubectlOptions: kubectlOptions,
-	}
-
-	helm.Delete(t, helmOptions, "camunda", true)
-
-	pvcs := k8s.ListPersistentVolumeClaims(t, kubectlOptions, metav1.ListOptions{})
-
-	for _, pvc := range pvcs {
-		k8s.RunKubectl(t, kubectlOptions, "delete", "pvc", pvc.Name)
-	}
-
-	pvs := k8s.ListPersistentVolumes(t, kubectlOptions, metav1.ListOptions{})
-
-	for _, pv := range pvs {
-		k8s.RunKubectl(t, kubectlOptions, "delete", "pv", pv.Name)
-	}
-
-}
-
-func initKubernetesHelpers(t *testing.T) {
-	primary = helpers.Cluster{
-		Region:           "eu-west-2",
-		ClusterName:      "lars-london",
-		KubectlNamespace: *k8s.NewKubectlOptions("", kubeConfigPrimary, "camunda-primary"),
-		KubectlSystem:    *k8s.NewKubectlOptions("", kubeConfigPrimary, "kube-system"),
-	}
-	secondary = helpers.Cluster{
-		Region:           "eu-west-3",
-		ClusterName:      "lars-paris",
-		KubectlNamespace: *k8s.NewKubectlOptions("", kubeConfigSecondary, "camunda-secondary"),
-		KubectlSystem:    *k8s.NewKubectlOptions("", kubeConfigSecondary, "kube-system"),
-	}
-
-	k8s.CreateNamespace(t, &primary.KubectlNamespace, "camunda-primary")
-	k8s.CreateNamespace(t, &secondary.KubectlNamespace, "camunda-secondary")
+	helpers.TeardownC8Helm(t, &primary.KubectlNamespace)
+	helpers.TeardownC8Helm(t, &secondary.KubectlNamespace)
 }
 
 func cleanupKubernetes(t *testing.T) {
