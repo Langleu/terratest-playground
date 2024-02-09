@@ -55,15 +55,15 @@ jobs:
         AWS_PROFILE: "infex"
       run: |
         # Schedule deletion of KMS keys
-        aws kms list-aliases --query 'Aliases[?contains(AliasName, `lars`)].TargetKeyId' --region eu-west-2 --output text | xargs -t -n 1 -I {} aws kms schedule-key-deletion --region eu-west-2 --key-id {}
-        aws kms list-aliases --query 'Aliases[?contains(AliasName, `lars`)].TargetKeyId' --region eu-west-3 --output text | xargs -t -n 1 -I {} aws kms schedule-key-deletion --region eu-west-3 --key-id {}
+        aws kms list-aliases --query 'Aliases[?contains(AliasName, `nightly`)].TargetKeyId' --region eu-west-2 --output text | xargs -t -n 1 -I {} aws kms schedule-key-deletion --region eu-west-2 --key-id {}
+        aws kms list-aliases --query 'Aliases[?contains(AliasName, `nightly`)].TargetKeyId' --region eu-west-3 --output text | xargs -t -n 1 -I {} aws kms schedule-key-deletion --region eu-west-3 --key-id {}
 
         # Delete Alias from KMS keys
-        aws kms list-aliases --query 'Aliases[?contains(AliasName, `lars`)].AliasName' --region eu-west-2 --output text | xargs -t -n 1 -I {} aws kms delete-alias --region eu-west-2 --alias-name {}
-        aws kms list-aliases --query 'Aliases[?contains(AliasName, `lars`)].AliasName' --region eu-west-3 --output text | xargs -t -n 1 -I {} aws kms delete-alias --region eu-west-3 --alias-name {}
+        aws kms list-aliases --query 'Aliases[?contains(AliasName, `nightly`)].AliasName' --region eu-west-2 --output text | xargs -t -n 1 -I {} aws kms delete-alias --region eu-west-2 --alias-name {}
+        aws kms list-aliases --query 'Aliases[?contains(AliasName, `nightly`)].AliasName' --region eu-west-3 --output text | xargs -t -n 1 -I {} aws kms delete-alias --region eu-west-3 --alias-name {}
 
         # Detach permissions and profile instances and delete IAM roles
-        role_arns=$(aws iam list-roles --query 'Roles[?contains(RoleName, `lars`)].RoleName' --output text)
+        role_arns=$(aws iam list-roles --query 'Roles[?contains(RoleName, `nightly`)].RoleName' --output text)
 
         read -r -a role_arns_array <<< "$role_arns"
 
@@ -90,17 +90,17 @@ jobs:
 
         done
 
-        aws iam list-roles --query 'Roles[?contains(RoleName, `lars`)].RoleName' --output text | xargs -t -n 1 -I {} aws iam delete-role --role-name {}
+        aws iam list-roles --query 'Roles[?contains(RoleName, `nightly`)].RoleName' --output text | xargs -t -n 1 -I {} aws iam delete-role --role-name {}
 
         # Delete Policies
-        aws iam list-policies --query 'Policies[?contains(PolicyName, `lars`)].Arn' --output text | xargs -t -n 1 -I {} aws iam delete-policy --policy-arn {}
+        aws iam list-policies --query 'Policies[?contains(PolicyName, `nightly`)].Arn' --output text | xargs -t -n 1 -I {} aws iam delete-policy --policy-arn {}
 
         # Delete OIDC Provider
         aws iam list-open-id-connect-providers --query 'OpenIDConnectProviderList[?contains(Arn, `eu-west-2`)].Arn' --output text | xargs -t -n 1 -I {} aws iam delete-open-id-connect-provider --open-id-connect-provider-arn {}
         aws iam list-open-id-connect-providers --query 'OpenIDConnectProviderList[?contains(Arn, `eu-west-3`)].Arn' --output text | xargs -t -n 1 -I {} aws iam delete-open-id-connect-provider --open-id-connect-provider-arn {}
         
         # Delete VPC Peering Connection
-        aws ec2 describe-vpc-peering-connections --region eu-west-2 --query 'VpcPeeringConnections[?Status.Code == `active` && Tags[?contains(Value, `lars`)]]'.VpcPeeringConnectionId --output text | xargs -t -n 1 -I {} aws ec2 delete-vpc-peering-connection --region eu-west-2 --vpc-peering-connection-id {}
+        aws ec2 describe-vpc-peering-connections --region eu-west-2 --query 'VpcPeeringConnections[?Status.Code == `active` && Tags[?contains(Value, `nightly`)]]'.VpcPeeringConnectionId --output text | xargs -t -n 1 -I {} aws ec2 delete-vpc-peering-connection --region eu-west-2 --vpc-peering-connection-id {}
 
     # The second run should remove the remaining resources (VPCs) and fail if there's anything left
     - name: Run Cloud Nuke

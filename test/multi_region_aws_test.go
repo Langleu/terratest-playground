@@ -49,7 +49,7 @@ func TestSetupTerraform(t *testing.T) {
 
 	t.Logf("[TF SETUP] Generating kubeconfig files 📜")
 
-	cmd := exec.Command("aws", "eks", "--region", "eu-west-3", "update-kubeconfig", "--name", "lars-paris", "--profile", "infex", "--kubeconfig", "kubeconfig-paris")
+	cmd := exec.Command("aws", "eks", "--region", "eu-west-3", "update-kubeconfig", "--name", "nightly-paris", "--profile", "infex", "--kubeconfig", "kubeconfig-paris")
 
 	_, err := cmd.Output()
 	if err != nil {
@@ -58,7 +58,7 @@ func TestSetupTerraform(t *testing.T) {
 
 	require.FileExists(t, "kubeconfig-paris", "kubeconfig-paris file does not exist")
 
-	cmd2 := exec.Command("aws", "eks", "--region", "eu-west-2", "update-kubeconfig", "--name", "lars-london", "--profile", "infex", "--kubeconfig", "kubeconfig-london")
+	cmd2 := exec.Command("aws", "eks", "--region", "eu-west-2", "update-kubeconfig", "--name", "nightly-london", "--profile", "infex", "--kubeconfig", "kubeconfig-london")
 
 	_, err2 := cmd2.Output()
 	if err2 != nil {
@@ -124,13 +124,13 @@ func initKubernetesHelpers(t *testing.T) {
 	t.Logf("[K8S INIT] Initializing Kubernetes helpers 🚀")
 	primary = helpers.Cluster{
 		Region:           "eu-west-2",
-		ClusterName:      "lars-london",
+		ClusterName:      "nightly-london",
 		KubectlNamespace: *k8s.NewKubectlOptions("", kubeConfigPrimary, "camunda-primary"),
 		KubectlSystem:    *k8s.NewKubectlOptions("", kubeConfigPrimary, "kube-system"),
 	}
 	secondary = helpers.Cluster{
 		Region:           "eu-west-3",
-		ClusterName:      "lars-paris",
+		ClusterName:      "nightly-paris",
 		KubectlNamespace: *k8s.NewKubectlOptions("", kubeConfigSecondary, "camunda-secondary"),
 		KubectlSystem:    *k8s.NewKubectlOptions("", kubeConfigSecondary, "kube-system"),
 	}

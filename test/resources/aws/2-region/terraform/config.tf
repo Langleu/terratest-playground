@@ -3,7 +3,7 @@
 ################################
 
 locals {
-  name = "lars" # just some abbotrary name to prefix resources
+  name = "nightly" # just some abbotrary name to prefix resources
   # For demenstration purposes, we will use owner and acceptor as separation. Naming choice will become clearer when seeing the peering setup
   owner = {
     region           = "eu-west-2"     # London

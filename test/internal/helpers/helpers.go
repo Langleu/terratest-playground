@@ -172,16 +172,16 @@ func CrossClusterCommunication(t *testing.T, withDNS bool, k8sManifests string, 
 			outputPrimary, errPrimary := k8s.RunKubectlAndGetOutputE(t, &primary.KubectlNamespace, "exec", podPrimary.Name, "--", "curl", "--max-time", "15", "sample-nginx.sample-nginx-peer.camunda-secondary.svc.cluster.local")
 			outputSecondary, errSecondary := k8s.RunKubectlAndGetOutputE(t, &secondary.KubectlNamespace, "exec", podSecondary.Name, "--", "curl", "--max-time", "15", "sample-nginx.sample-nginx-peer.camunda-primary.svc.cluster.local")
 			if errPrimary != nil || errSecondary != nil {
-				t.Logf("[CROSS CLUSTER COMMUNICATION] Error: ", errPrimary)
-				t.Logf("[CROSS CLUSTER COMMUNICATION] Error: ", errSecondary)
-				t.Logf("[CROSS CLUSTER COMMUNICATION] CoreDNS not resolving yet, waiting ...")
+				t.Logf("[CROSS CLUSTER COMMUNICATION] Error: %s", errPrimary)
+				t.Logf("[CROSS CLUSTER COMMUNICATION] Error: %s", errSecondary)
+				t.Log("[CROSS CLUSTER COMMUNICATION] CoreDNS not resolving yet, waiting ...")
 				time.Sleep(15 * time.Second)
 			}
 
 			if outputPrimary != "" && outputSecondary != "" {
-				t.Logf(outputPrimary)
-				t.Logf(outputSecondary)
-				t.Logf("[CROSS CLUSTER COMMUNICATION] Communication established")
+				t.Logf("[CROSS CLUSTER COMMUNICATION] Success: %s", outputPrimary)
+				t.Logf("[CROSS CLUSTER COMMUNICATION] Success: %s", outputSecondary)
+				t.Log("[CROSS CLUSTER COMMUNICATION] Communication established")
 				break
 			}
 		}
@@ -196,13 +196,13 @@ func CrossClusterCommunication(t *testing.T, withDNS bool, k8sManifests string, 
 		k8s.RunKubectl(t, &primary.KubectlNamespace, "exec", podPrimary.Name, "--", "curl", "--max-time", "15", podSecondaryIP)
 		k8s.RunKubectl(t, &secondary.KubectlNamespace, "exec", podSecondary.Name, "--", "curl", "--max-time", "15", podPrimaryIP)
 
-		t.Logf("[CROSS CLUSTER COMMUNICATION] Communication established")
+		t.Log("[CROSS CLUSTER COMMUNICATION] Communication established")
 	}
 }
 
 func DNSChaining(t *testing.T, source, target Cluster, k8sManifests string) {
 
-	t.Logf(fmt.Sprintf("[DNS CHAINING] applying from source %s to configure target %s", source.ClusterName, target.ClusterName))
+	t.Logf("[DNS CHAINING] applying from source %s to configure target %s", source.ClusterName, target.ClusterName)
 
 	kubeResourcePath := fmt.Sprintf("%s/%s", k8sManifests, "internal-dns-lb.yml")
 
@@ -261,7 +261,7 @@ func DNSChaining(t *testing.T, source, target Cluster, k8sManifests string) {
 	// Apply the CoreDNS change to the target cluster to let it know how to reach the source cluster
 	k8s.KubectlApply(t, &target.KubectlSystem, filePath)
 
-	t.Logf("[DNS CHAINING] Writing Placeholder CoreDNS ConfigMap back to file")
+	t.Log("[DNS CHAINING] Writing Placeholder CoreDNS ConfigMap back to file")
 	// Write the old file back to the file - required for bidirectional communication
 	err = os.WriteFile(filePath, []byte(fileContent), 0644)
 	if err != nil {
@@ -280,10 +280,10 @@ func CheckCoreDNSReload(t *testing.T, kubectlOptions *k8s.KubectlOptions) {
 			logs := k8s.GetPodLogs(t, kubectlOptions, &pod, "coredns")
 
 			if !strings.Contains(logs, "Reloading complete") {
-				t.Logf("[COREDNS RELOAD] CoreDNS not reloaded yet. Waiting...")
+				t.Log("[COREDNS RELOAD] CoreDNS not reloaded yet. Waiting...")
 				time.Sleep(15 * time.Second)
 			} else {
-				t.Logf("[COREDNS RELOAD] CoreDNS reloaded successfully")
+				t.Log("[COREDNS RELOAD] CoreDNS reloaded successfully")
 				break
 			}
 		}
