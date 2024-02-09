@@ -18,7 +18,7 @@ jobs:
       uses: Eun/go-mod-details@v1
       id: go-mod-details
       with: 
-        modfile: ${{ GITHUB_WORKSPACE }}/test/go.mod
+        modfile: ${{ github.workspace }}/test/go.mod
     
     - name: Set up Go environment
       uses: actions/setup-go@v5
