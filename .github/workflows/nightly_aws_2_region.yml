@@ -1,10 +1,12 @@
-name: CI
+name: Nightly AWS EKS 2 Region Test
 
 on:
-  push:
+  schedule:
+  - cron: '0 0 * * 1-5'
+  workflow_dispatch:
 
 jobs:
-  build:
+  aws-eks-2-region-test:
     runs-on: ubuntu-latest
     # Other dependencies from hosted runner
     # AWS CLI
