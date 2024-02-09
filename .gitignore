@@ -75,7 +75,7 @@ Temporary Items
 ### Terraform ###
 # Local .terraform directories
 **/.terraform/*
-*/.terraform.lock.hcl
+**/.terraform.lock.hcl
 
 # .tfstate files
 *.tfstate

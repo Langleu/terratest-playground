@@ -8,7 +8,6 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/ec2 v1.146.0
 	github.com/aws/aws-sdk-go-v2/service/eks v1.37.1
 	github.com/camunda/zeebe/clients/go/v8 v8.4.1
-	github.com/gruntwork-io/go-commons v0.8.0
 	github.com/gruntwork-io/terratest v0.46.11
 	github.com/stretchr/testify v1.8.4
 	k8s.io/apimachinery v0.28.4
@@ -65,6 +64,7 @@ require (
 	github.com/google/uuid v1.5.0 // indirect
 	github.com/googleapis/enterprise-certificate-proxy v0.2.4 // indirect
 	github.com/googleapis/gax-go/v2 v2.12.0 // indirect
+	github.com/gruntwork-io/go-commons v0.8.0 // indirect
 	github.com/hashicorp/errwrap v1.0.0 // indirect
 	github.com/hashicorp/go-cleanhttp v0.5.2 // indirect
 	github.com/hashicorp/go-getter v1.7.1 // indirect
