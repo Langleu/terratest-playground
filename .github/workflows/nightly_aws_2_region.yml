@@ -63,11 +63,13 @@ jobs:
         go test --count=1 -v -timeout 15m ../test -run Test2RegionAWSEKS
 
     - name: Terratest Terraform Teardown
+      if: always()
       working-directory: ./test
       timeout-minutes: 15
       run: |
         go test --count=1 -v -timeout 15m ../test -run TestTeardownTerraform
 
-    - name: Remove profile credentials from ~/.aws/credentials 
+    - name: Remove profile credentials from ~/.aws/credentials
+      if: always()
       run: |
-          rm -rf ~/.aws/credentials
+        rm -rf ~/.aws/credentials

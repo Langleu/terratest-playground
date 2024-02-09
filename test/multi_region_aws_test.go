@@ -16,7 +16,6 @@ import (
 	"github.com/camunda/zeebe/clients/go/v8/pkg/zbc"
 	"github.com/gruntwork-io/terratest/modules/helm"
 	"github.com/gruntwork-io/terratest/modules/k8s"
-	"github.com/gruntwork-io/terratest/modules/random"
 	"github.com/gruntwork-io/terratest/modules/terraform"
 	"github.com/stretchr/testify/require"
 )
@@ -221,10 +220,8 @@ func deployC8Helm(t *testing.T) {
 		ValuesFiles:    []string{"./resources/aws/2-region/kubernetes/camunda-values.yml", "./resources/aws/2-region/kubernetes/region1/camunda-values.yml"},
 	}
 
-	uniqueName := strings.ToLower(fmt.Sprintf("terratest-%s", random.UniqueId()))
-
-	helm.AddRepo(t, helmOptionsPrimary, uniqueName, remoteChartSource)
-	helm.AddRepo(t, helmOptionsSecondary, uniqueName, remoteChartSource)
+	helm.AddRepo(t, helmOptionsPrimary, "camunda", remoteChartSource)
+	helm.AddRepo(t, helmOptionsSecondary, "camunda", remoteChartSource)
 
 	helmChart := remoteChartName
 
