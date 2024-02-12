@@ -3,7 +3,6 @@ package multiregionaws
 import (
 	"context"
 	"fmt"
-	"log"
 	"os"
 	"os/exec"
 	"strconv"
@@ -24,6 +23,7 @@ const (
 	remoteChartSource = "https://helm.camunda.io"
 	remoteChartName   = "camunda/camunda-platform"
 
+	resourceDir         = "./resources/aws/2-region"
 	terraformDir        = "./resources/aws/2-region/terraform"
 	kubeConfigPrimary   = "./kubeconfig-london"
 	kubeConfigSecondary = "./kubeconfig-paris"
@@ -38,7 +38,7 @@ var secondary helpers.Cluster
 // Terraform Cluster Setup and TearDown
 
 func TestSetupTerraform(t *testing.T) {
-	t.Logf("[TF SETUP] Applying Terraform config 👋")
+	t.Log("[TF SETUP] Applying Terraform config 👋")
 
 	terraformOptions := terraform.WithDefaultRetryableErrors(t, &terraform.Options{
 		TerraformDir: terraformDir,
@@ -47,13 +47,14 @@ func TestSetupTerraform(t *testing.T) {
 
 	terraform.InitAndApply(t, terraformOptions)
 
-	t.Logf("[TF SETUP] Generating kubeconfig files 📜")
+	t.Log("[TF SETUP] Generating kubeconfig files 📜")
 
 	cmd := exec.Command("aws", "eks", "--region", "eu-west-3", "update-kubeconfig", "--name", "nightly-paris", "--profile", "infex", "--kubeconfig", "kubeconfig-paris")
 
 	_, err := cmd.Output()
 	if err != nil {
-		log.Fatalf("[TF SETUP] could not run command: %v", err)
+		t.Fatalf("[TF SETUP] could not run command: %v", err)
+		return
 	}
 
 	require.FileExists(t, "kubeconfig-paris", "kubeconfig-paris file does not exist")
@@ -62,14 +63,15 @@ func TestSetupTerraform(t *testing.T) {
 
 	_, err2 := cmd2.Output()
 	if err2 != nil {
-		log.Fatalf("[TF SETUP] could not run command: %v", err2)
+		t.Fatalf("[TF SETUP] could not run command: %v", err2)
+		return
 	}
 
 	require.FileExists(t, "kubeconfig-london", "kubeconfig-london file does not exist")
 }
 
 func TestTeardownTerraform(t *testing.T) {
-	t.Logf("[TF TEARDOWN] Destroying workspace 🖖")
+	t.Log("[TF TEARDOWN] Destroying workspace 🖖")
 
 	terraformOptions := terraform.WithDefaultRetryableErrors(t, &terraform.Options{
 		TerraformDir: terraformDir,
@@ -87,7 +89,7 @@ func TestTeardownTerraform(t *testing.T) {
 // AWS EKS Multi-Region Tests
 
 func Test2RegionAWSEKS(t *testing.T) {
-	t.Logf("[2 REGION TEST] Running tests for AWS EKS Multi-Region 🚀")
+	t.Log("[2 REGION TEST] Running tests for AWS EKS Multi-Region 🚀")
 
 	// For CI run it separately
 	// go test --count=1 -v -timeout 120m ../test -run TestSetupTerraform
@@ -111,6 +113,7 @@ func Test2RegionAWSEKS(t *testing.T) {
 		{"TestCrossClusterCommunicationWithDNS", testCrossClusterCommunicationWithDNS},
 		{"TestDeployC8Helm", deployC8Helm},
 		{"TestCheckC8RunningProperly", checkC8RunningProperly},
+		{"TestDeployC8processAndCheck", deployC8processAndCheck},
 		{"TestTeardownAllC8Helm", teardownAllC8Helm},
 		{"TestCleanupKubernetes", cleanupKubernetes},
 	} {
@@ -121,7 +124,7 @@ func Test2RegionAWSEKS(t *testing.T) {
 // Single Test functions
 
 func initKubernetesHelpers(t *testing.T) {
-	t.Logf("[K8S INIT] Initializing Kubernetes helpers 🚀")
+	t.Log("[K8S INIT] Initializing Kubernetes helpers 🚀")
 	primary = helpers.Cluster{
 		Region:           "eu-west-2",
 		ClusterName:      "nightly-london",
@@ -140,7 +143,7 @@ func initKubernetesHelpers(t *testing.T) {
 }
 
 func clusterReadyCheck(t *testing.T) {
-	t.Logf("[CLUSTER CHECK] Checking if clusters are ready 🚦")
+	t.Log("[CLUSTER CHECK] Checking if clusters are ready 🚦")
 	statusPrimary := helpers.WaitForCluster(primary.Region, primary.ClusterName)
 	statusSecondary := helpers.WaitForCluster(secondary.Region, secondary.ClusterName)
 
@@ -152,12 +155,12 @@ func clusterReadyCheck(t *testing.T) {
 }
 
 func testCrossClusterCommunication(t *testing.T) {
-	t.Logf("[CROSS CLUSTER] Testing cross-cluster communication with IPs 📡")
+	t.Log("[CROSS CLUSTER] Testing cross-cluster communication with IPs 📡")
 	helpers.CrossClusterCommunication(t, false, k8sManifests, primary, secondary)
 }
 
 func applyDnsChaining(t *testing.T) {
-	t.Logf("[DNS CHAINING] Applying DNS chaining 📡")
+	t.Log("[DNS CHAINING] Applying DNS chaining 📡")
 	helpers.DNSChaining(t, primary, secondary, k8sManifests)
 	helpers.DNSChaining(t, secondary, primary, k8sManifests)
 }
@@ -169,12 +172,12 @@ func testCoreDNSReload(t *testing.T) {
 }
 
 func testCrossClusterCommunicationWithDNS(t *testing.T) {
-	t.Logf("[CROSS CLUSTER] Testing cross-cluster communication with DNS 📡")
+	t.Log("[CROSS CLUSTER] Testing cross-cluster communication with DNS 📡")
 	helpers.CrossClusterCommunication(t, true, k8sManifests, primary, secondary)
 }
 
 func deployC8Helm(t *testing.T) {
-	t.Logf("[C8 HELM] Deploying Camunda Platform Helm Chart 🚀")
+	t.Log("[C8 HELM] Deploying Camunda Platform Helm Chart 🚀")
 	zeebeContactPoints := ""
 
 	for i := 0; i < 4; i++ {
@@ -188,7 +191,7 @@ func deployC8Helm(t *testing.T) {
 	filePath := "./resources/aws/2-region/kubernetes/camunda-values.yml"
 	content, err := os.ReadFile(filePath)
 	if err != nil {
-		log.Fatalf("[C8 HELM] Error reading file: %v\n", err)
+		t.Fatalf("[C8 HELM] Error reading file: %v\n", err)
 		return
 	}
 
@@ -204,7 +207,7 @@ func deployC8Helm(t *testing.T) {
 	// Write the modified content back to the file
 	err = os.WriteFile(filePath, []byte(modifiedContent), 0644)
 	if err != nil {
-		log.Fatalf("[C8 HELM] Error writing file: %v\n", err)
+		t.Fatalf("[C8 HELM] Error writing file: %v\n", err)
 		return
 	}
 
@@ -264,13 +267,13 @@ func deployC8Helm(t *testing.T) {
 	// Write the old file back to the file - mostly for local development
 	err = os.WriteFile(filePath, []byte(fileContent), 0644)
 	if err != nil {
-		log.Fatalf("[C8 HELM] Error writing file: %v\n", err)
+		t.Fatalf("[C8 HELM] Error writing file: %v\n", err)
 		return
 	}
 }
 
 func checkC8RunningProperly(t *testing.T) {
-	t.Logf("[C8 CHECK] Checking if Camunda Platform is running properly 🚦")
+	t.Log("[C8 CHECK] Checking if Camunda Platform is running properly 🚦")
 	service := k8s.GetService(t, &primary.KubectlNamespace, "camunda-zeebe-gateway")
 	require.Equal(t, service.Name, "camunda-zeebe-gateway")
 
@@ -283,7 +286,8 @@ func checkC8RunningProperly(t *testing.T) {
 		UsePlaintextConnection: true,
 	})
 	if err != nil {
-		log.Fatalf("[C8 CHECK] Failed to create client: %v", err)
+		t.Fatalf("[C8 CHECK] Failed to create client: %v", err)
+		return
 	}
 
 	defer client.Close()
@@ -291,7 +295,8 @@ func checkC8RunningProperly(t *testing.T) {
 	// Get the topology of the Zeebe cluster
 	topology, err := client.NewTopologyCommand().Send(context.Background())
 	if err != nil {
-		log.Fatalf("[C8 CHECK] Failed to get topology: %v", err)
+		t.Fatalf("[C8 CHECK] Failed to get topology: %v", err)
+		return
 	}
 
 	require.Equal(t, 8, len(topology.Brokers))
@@ -299,7 +304,7 @@ func checkC8RunningProperly(t *testing.T) {
 	primaryCount := 0
 	secondaryCount := 0
 
-	t.Logf("[C8 CHECK] Cluster status:")
+	t.Log("[C8 CHECK] Cluster status:")
 	for _, broker := range topology.Brokers {
 		if strings.Contains(broker.Host, "camunda-primary") {
 			primaryCount++
@@ -313,14 +318,59 @@ func checkC8RunningProperly(t *testing.T) {
 	require.Equal(t, 4, secondaryCount)
 }
 
+func deployC8processAndCheck(t *testing.T) {
+	t.Log("[C8 PROCESS] Deploying a process and checking if it's running 🚀")
+	service := k8s.GetService(t, &primary.KubectlNamespace, "camunda-zeebe-gateway")
+	require.Equal(t, service.Name, "camunda-zeebe-gateway")
+
+	tunnel := k8s.NewTunnel(&primary.KubectlNamespace, k8s.ResourceTypeService, "camunda-zeebe-gateway", 0, 26500)
+	defer tunnel.Close()
+	tunnel.ForwardPort(t)
+
+	client, err := zbc.NewClient(&zbc.ClientConfig{
+		GatewayAddress:         tunnel.Endpoint(),
+		UsePlaintextConnection: true,
+	})
+	if err != nil {
+		t.Fatalf("[C8 PROCESS] Failed to create client: %v", err)
+		return
+	}
+
+	defer client.Close()
+
+	ctx := context.Background()
+	response, err := client.NewDeployResourceCommand().AddResourceFile(fmt.Sprintf("%s/single-task.bpmn", resourceDir)).Send(ctx)
+	if err != nil {
+		t.Fatalf("[C8 PROCESS] %s", err)
+		return
+	}
+	t.Logf("[C8 PROCESS] Created process: %s", response.String())
+	require.NotEmpty(t, response.String())
+	require.Contains(t, response.String(), "bigVarProcess")
+
+	t.Log("[C8 PROCESS] Starting another Process instance 🚀")
+	msg, err := client.NewCreateInstanceCommand().BPMNProcessId("bigVarProcess").LatestVersion().Send(ctx)
+	if err != nil {
+		t.Fatalf("[C8 PROCESS] %s", err)
+		return
+	}
+	t.Logf("[C8 PROCESS] Created process: %s", msg.String())
+	require.NotEmpty(t, msg.String())
+	require.Contains(t, msg.String(), "bigVarProcess")
+
+	// check that was exported to ElasticSearch and available via Operate
+	helpers.CheckOperateForProcesses(t, primary)
+	helpers.CheckOperateForProcesses(t, secondary)
+}
+
 func teardownAllC8Helm(t *testing.T) {
-	t.Logf("[C8 HELM TEARDOWN] Tearing down Camunda Platform Helm Chart 🚀")
+	t.Log("[C8 HELM TEARDOWN] Tearing down Camunda Platform Helm Chart 🚀")
 	helpers.TeardownC8Helm(t, &primary.KubectlNamespace)
 	helpers.TeardownC8Helm(t, &secondary.KubectlNamespace)
 }
 
 func cleanupKubernetes(t *testing.T) {
-	t.Logf("[K8S CLEANUP] Cleaning up Kubernetes resources 🧹")
+	t.Log("[K8S CLEANUP] Cleaning up Kubernetes resources 🧹")
 	k8s.DeleteNamespace(t, &primary.KubectlNamespace, "camunda-primary")
 	k8s.DeleteNamespace(t, &secondary.KubectlNamespace, "camunda-secondary")
 

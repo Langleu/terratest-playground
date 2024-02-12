@@ -1,8 +1,11 @@
 package helpers
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"strings"
 	"testing"
@@ -28,6 +31,7 @@ func WaitForNodeGroup(region, clusterName, nodegroupName string) {
 	)
 	if err != nil {
 		fmt.Println("[CLUSTER CHECK] Error creating session:", err)
+		return
 	}
 
 	client := eks.NewFromConfig(cfg)
@@ -39,6 +43,7 @@ func WaitForNodeGroup(region, clusterName, nodegroupName string) {
 		})
 		if err != nil {
 			fmt.Println("[CLUSTER CHECK] Error describing nodegroup:", err)
+			return
 		}
 
 		if resp.Nodegroup.Status == eks_types.NodegroupStatus("ACTIVE") {
@@ -311,6 +316,68 @@ func TeardownC8Helm(t *testing.T, kubectlOptions *k8s.KubectlOptions) {
 		k8s.RunKubectl(t, kubectlOptions, "delete", "pv", pv.Name)
 	}
 
+}
+
+func CheckOperateForProcesses(t *testing.T, cluster Cluster) {
+	t.Logf("[C8 PROCESS] Checking for Cluster %s whether Operate contains deployed processes", cluster.ClusterName)
+
+	// strange behaviour since service is on 80 but pod on 8080
+	tunnelOperate := k8s.NewTunnel(&cluster.KubectlNamespace, k8s.ResourceTypeService, "camunda-operate", 0, 8080)
+	defer tunnelOperate.Close()
+	tunnelOperate.ForwardPort(t)
+
+	// the Cookie grants access since we don't have an API key
+	resp, err := http.Post(fmt.Sprintf("http://%s/api/login?username=demo&password=demo", tunnelOperate.Endpoint()), "application/json", bytes.NewBufferString("{}"))
+	if err != nil {
+		t.Fatalf("[C8 PROCESS] %s", err)
+		return
+	}
+
+	var cookieAuth string
+	for _, val := range resp.Cookies() {
+		if val.Name == "OPERATE-SESSION" {
+			cookieAuth = val.Value
+		}
+	}
+
+	// create http client to add cookie to the request
+	client := &http.Client{}
+	req, err := http.NewRequest("POST", fmt.Sprintf("http://%s/v1/process-definitions/search", tunnelOperate.Endpoint()), strings.NewReader(`{}`))
+	if err != nil {
+		t.Fatalf("[C8 PROCESS] %s", err)
+		return
+	}
+	req.Header.Add("Content-Type", "application/json")
+	req.Header.Add("Cookie", fmt.Sprintf("OPERATE-SESSION=%s", cookieAuth))
+
+	var bodyString string
+	for i := 0; i < 8; i++ {
+		res, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("[C8 PROCESS] %s", err)
+			return
+		}
+		defer res.Body.Close()
+
+		body, err := io.ReadAll(res.Body)
+		if err != nil {
+			t.Fatalf("[C8 PROCESS] %s", err)
+			return
+		}
+
+		bodyString = string(body)
+
+		t.Logf("[C8 Process] %s", bodyString)
+		if !strings.Contains(bodyString, "\"total\":0") {
+			t.Log("[C8 PROCESS] processes are present, breaking and asserting")
+			break
+		}
+		t.Log("[C8 PROCESS] not imported yet, waiting...")
+		time.Sleep(15 * time.Second)
+	}
+
+	require.Contains(t, bodyString, "Big variable process")
+	require.Contains(t, bodyString, "bigVarProcess")
 }
 
 // Go Helpers

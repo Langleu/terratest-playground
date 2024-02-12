@@ -4,7 +4,6 @@ on:
   schedule:
   - cron: '0 0 * * 1-5'
   workflow_dispatch:
-  push:
 
 jobs:
   aws-eks-2-region-test:
@@ -33,24 +32,24 @@ jobs:
       with:
         terraform_version: "1.7.3"
 
-    # - name: Import Secrets
-    #   id: secrets
-    #   uses: hashicorp/vault-action@v2
-    #   with:
-    #     url: ${{ secrets.VAULT_ADDR }}
-    #     method: approle
-    #     roleId: ${{ secrets.VAULT_ROLE_ID }}
-    #     secretId: ${{ secrets.VAULT_SECRET_ID }}
-    #     exportEnv: false
-    #     secrets: |
-    #       secret/data/products/infrastructure-experience/ci/common AWS_ACCESS_KEY;
-    #       secret/data/products/infrastructure-experience/ci/common AWS_SECRET_KEY;
+    - name: Import Secrets
+      id: secrets
+      uses: hashicorp/vault-action@v2
+      with:
+        url: ${{ secrets.VAULT_ADDR }}
+        method: approle
+        roleId: ${{ secrets.VAULT_ROLE_ID }}
+        secretId: ${{ secrets.VAULT_SECRET_ID }}
+        exportEnv: false
+        secrets: |
+          secret/data/products/infrastructure-experience/ci/common AWS_ACCESS_KEY;
+          secret/data/products/infrastructure-experience/ci/common AWS_SECRET_KEY;
 
     # Official action does not support profiles
     - name: Add profile credentials to ~/.aws/credentials 
       run: |
-          aws configure set aws_access_key_id ${{ secrets.AWS_ACCESS_KEY }} --profile infex
-          aws configure set aws_secret_access_key ${{ secrets.AWS_SECRET_KEY }} --profile infex
+          aws configure set aws_access_key_id ${{ steps.secrets.outputs.AWS_ACCESS_KEY }} --profile infex
+          aws configure set aws_secret_access_key ${{ steps.secrets.outputs.AWS_SECRET_KEY }} --profile infex
           aws configure set region eu-west-2 --profile infex
 
     - name: Terratest Terraform Init And Apply
