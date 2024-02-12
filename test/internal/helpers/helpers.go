@@ -24,36 +24,38 @@ import (
 )
 
 // AWS Helpers
-func WaitForNodeGroup(region, clusterName, nodegroupName string) {
+func WaitForNodeGroup(region, clusterName, nodegroupName string) string {
 	cfg, err := config.LoadDefaultConfig(context.TODO(),
 		config.WithRegion(region),
 		config.WithSharedConfigProfile("infex"), // TODO: remove, local setup specific
 	)
 	if err != nil {
 		fmt.Println("[CLUSTER CHECK] Error creating session:", err)
-		return
+		return err.Error()
 	}
 
 	client := eks.NewFromConfig(cfg)
 
-	for {
+	for i := 0; i < 20; i++ {
 		resp, err := client.DescribeNodegroup(context.TODO(), &eks.DescribeNodegroupInput{
 			ClusterName:   &clusterName,
 			NodegroupName: &nodegroupName,
 		})
 		if err != nil {
 			fmt.Println("[CLUSTER CHECK] Error describing nodegroup:", err)
-			return
+			return err.Error()
 		}
 
 		if resp.Nodegroup.Status == eks_types.NodegroupStatus("ACTIVE") {
 			fmt.Printf("[CLUSTER CHECK] Nodegroup %s in cluster %s is ready!\n", nodegroupName, clusterName)
-			break
+			return string(resp.Nodegroup.Status)
 		}
 
 		fmt.Printf("[CLUSTER CHECK] Nodegroup %s in cluster %s is not ready yet. Waiting...\n", nodegroupName, clusterName)
 		time.Sleep(30 * time.Second)
 	}
+
+	return ""
 }
 
 func WaitForCluster(region, clusterName string) string {
@@ -77,22 +79,18 @@ func WaitForCluster(region, clusterName string) string {
 		resp, err := client.DescribeCluster(context.TODO(), input)
 		if err != nil {
 			fmt.Println("[CLUSTER CHECK] Error describing cluster:", err)
+			return err.Error()
 		}
 
 		if resp.Cluster.Status == eks_types.ClusterStatus("ACTIVE") {
 			fmt.Printf("[CLUSTER CHECK] Cluster %s is ACTIVE\n", *resp.Cluster.Name)
-			break
+			return string(resp.Cluster.Status)
 		}
 
 		time.Sleep(15 * time.Second)
 	}
 
-	resp, err := client.DescribeCluster(context.TODO(), input)
-	if err != nil {
-		fmt.Println("[CLUSTER CHECK] Error describing cluster:", err)
-	}
-
-	return string(resp.Cluster.Status)
+	return ""
 }
 
 func GetPrivateIPsForInternalLB(region, description string) []string {

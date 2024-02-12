@@ -144,14 +144,17 @@ func initKubernetesHelpers(t *testing.T) {
 
 func clusterReadyCheck(t *testing.T) {
 	t.Log("[CLUSTER CHECK] Checking if clusters are ready 🚦")
-	statusPrimary := helpers.WaitForCluster(primary.Region, primary.ClusterName)
-	statusSecondary := helpers.WaitForCluster(secondary.Region, secondary.ClusterName)
+	clusterStatusPrimary := helpers.WaitForCluster(primary.Region, primary.ClusterName)
+	clusterStatusSecondary := helpers.WaitForCluster(secondary.Region, secondary.ClusterName)
 
-	require.Equal(t, "ACTIVE", statusPrimary)
-	require.Equal(t, "ACTIVE", statusSecondary)
+	require.Equal(t, "ACTIVE", clusterStatusPrimary)
+	require.Equal(t, "ACTIVE", clusterStatusSecondary)
 
-	helpers.WaitForNodeGroup(primary.Region, primary.ClusterName, "services")
-	helpers.WaitForNodeGroup(secondary.Region, secondary.ClusterName, "services")
+	nodeGroupStatusPrimary := helpers.WaitForNodeGroup(primary.Region, primary.ClusterName, "services")
+	nodeGroupStatusSecondary := helpers.WaitForNodeGroup(secondary.Region, secondary.ClusterName, "services")
+
+	require.Equal(t, "ACTIVE", nodeGroupStatusPrimary)
+	require.Equal(t, "ACTIVE", nodeGroupStatusSecondary)
 }
 
 func testCrossClusterCommunication(t *testing.T) {
