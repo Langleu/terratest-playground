@@ -4,6 +4,7 @@ on:
   schedule:
   - cron: '0 0 * * 1-5'
   workflow_dispatch:
+  push:
 
 jobs:
   aws-eks-2-region-test:
@@ -58,9 +59,19 @@ jobs:
       run: |
         go test --count=1 -v -timeout 45m ../test -run TestSetupTerraform
 
-    - name: Terratest Test 2 Region AWS
+    - name: Terratest Test 2 Region AWS - C8.3
       working-directory: ./test
       timeout-minutes: 15
+      env:
+        HELM_CHART_VERSION: "8.3.5"
+      run: |
+        go test --count=1 -v -timeout 15m ../test -run Test2RegionAWSEKS
+
+    - name: Terratest Test 2 Region AWS - C8.4
+      working-directory: ./test
+      timeout-minutes: 15
+      env:
+        HELM_CHART_VERSION: "9.1.0"
       run: |
         go test --count=1 -v -timeout 15m ../test -run Test2RegionAWSEKS
 
